@@ -29,8 +29,7 @@ window.MABILISSS_CONFIG_REGISTRY = {
   GNG: {
     BRANCH_CODE:       "GNG",
     BRANCH_NAME:       "SSS Gingoog Branch",
-    SUPABASE_URL:      "https://lwspjziqjjscfzntgtcm.supabase.co",
-    SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx3c3BqemlxampzY2Z6bnRndGNtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI4NjQyMjEsImV4cCI6MjA4ODQ0MDIyMX0.Sj4BABg1HnMr0GCugNc678A2NSxL0Ou0z2dnL-9ys2w"
+    SUPABASE_URL:      "https://lwspjziqjjscfzntgtcm.supabase.co"
   }
   // Future MND branches: LAP, BTN, … add registry entries here.
 };
@@ -362,6 +361,17 @@ function fmt12h(t){
   return h12+":"+m+" "+ap;
 }
 
+/* ── Gateway call — replaces the direct Supabase client; this file carries no DB key ── */
+function gw(action, body){
+  body = body || {}; body.action = action;
+  var base = (CFG && CFG.SUPABASE_URL ? CFG.SUPABASE_URL : "").replace(/\/+$/, "");
+  return fetch(base + "/functions/v1/pwa-gateway", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  }).then(function(r){ return r.json(); });
+}
+
 /* ── Connect ── */
 function connect(){
   if(!CFG || !CFG.SUPABASE_URL){
@@ -369,7 +379,7 @@ function connect(){
     return;
   }
   try{
-    sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
+    // Database client removed — all data now flows through the gateway (no DB key in this file).
     $("branchName").textContent = CFG.BRANCH_NAME || "SSS Branch";
     // Show the official SSS logo immediately (embedded default); upgrade to branch logo_url after load.
     var img = $("sssLogoImg");
@@ -383,20 +393,12 @@ function connect(){
 
 /* ── Load branch_config + today's queue (column-scoped reads, like the kiosk) ── */
 function loadHome(){
-  Promise.all([
-    sb.from("branch_config").select("*").eq("id","main").single(),
-    sb.from("queue_entries")
-      .select("id,res_num,queue_date,category_id,lane,slot,status,source,bqms_number,preferred_time_slot")
-      .eq("queue_date", phtDateStr()),
-    sb.from("categories").select("*").order("sort_order"),
-    sb.from("services").select("*")
-  ]).then(function(res){
-    var bcfg = res[0], q = res[1], cats = res[2], svcs = res[3];
-    if(bcfg.error){ showError("Couldn't load branch info. Please retry."); console.error(bcfg.error); return; }
-    STATE.branch = bcfg.data || {};
-    STATE.queue  = (q && q.data) ? q.data : [];
-    STATE.categories = (cats && cats.data) ? cats.data.filter(function(c){ return !c.hidden; }) : [];
-    STATE.services   = (svcs && svcs.data) ? svcs.data : [];
+  gw("home", { date: phtDateStr() }).then(function(res){
+    if(res.error){ showError("Couldn't load branch info. Please retry."); console.error(res.error); return; }
+    STATE.branch = res.branch_config || {};
+    STATE.queue  = res.queue || [];
+    STATE.categories = (res.categories || []).filter(function(c){ return !c.hidden; });
+    STATE.services   = res.services || [];
     // If URL carries ?t=<entry_id> (from a QR or saved link), open the tracker directly.
     var urlToken = new URLSearchParams(window.location.search).get("t");
     if(urlToken){
@@ -413,24 +415,17 @@ function loadHome(){
 
 /* Refresh just the queue (for fresh cap checks before insert) */
 function refreshQueue(){
-  return sb.from("queue_entries")
-    .select("id,res_num,queue_date,category_id,lane,slot,status,source,bqms_number,preferred_time_slot")
-    .eq("queue_date", phtDateStr())
-    .then(function(q){ STATE.queue = (q && q.data) ? q.data : STATE.queue; return STATE.queue; });
+  return gw("queue", { date: phtDateStr() })
+    .then(function(res){ STATE.queue = (res && res.queue) ? res.queue : STATE.queue; return STATE.queue; });
 }
 
 /* Refresh branch_config + today's queue TOGETHER — keeps live status / test_mode / announcement /
    hours in sync with the staff & manager consoles. The consoles use realtime; the PWA polls, and
    until now it only polled the queue — so console status/test-mode changes never reached an open PWA. */
 function refreshAll(){
-  return Promise.all([
-    sb.from("branch_config").select("*").eq("id","main").single(),
-    sb.from("queue_entries")
-      .select("id,res_num,queue_date,category_id,lane,slot,status,source,bqms_number,preferred_time_slot")
-      .eq("queue_date", phtDateStr())
-  ]).then(function(res){
-    if(res[0] && res[0].data) STATE.branch = res[0].data;
-    STATE.queue = (res[1] && res[1].data) ? res[1].data : STATE.queue;
+  return gw("sync", { date: phtDateStr() }).then(function(res){
+    if(res && res.branch_config) STATE.branch = res.branch_config;
+    STATE.queue = (res && res.queue) ? res.queue : STATE.queue;
     return STATE.queue;
   });
 }
@@ -479,13 +474,24 @@ function reservationOpen(b, status){
   // test_mode FIRST — mirrors db.py is_reservation_open(): bypasses holiday / working-day / hours / time-window.
   if(b.test_mode===true || String(b.test_mode)==="true")
     return {open:true, msg:"TEST MODE — time restrictions bypassed", test:true};
-  if(!status.isOpen) return {open:false, msg:"Branch is closed."};
+  // R1 FIX: block ONLY genuine closure (holiday / non-working day / staff offline).
+  // Outside office hours is NOT genuine closure. Online reservations open at
+  // reservation_open_time (06:00), before the branch physically opens (08:00). The old
+  // guard keyed on status.isOpen, which is false before 08:00, so the 06:00 window never ran.
+  var holidays = (b.holidays || "");
+  var isHoliday = holidays.split(",").map(function(s){return s.trim();}).indexOf(phtDateStr()) >= 0;
+  var working = b.working_days || "mon,tue,wed,thu,fri";
+  var isWorking = working.toLowerCase().indexOf(phtDayKey()) >= 0;
+  var oStat = (b.o_stat || "online");
+  if(isHoliday)         return {open:false, closed:true, msg:"Today is a holiday. Reservations are closed."};
+  if(!isWorking)        return {open:false, closed:true, msg:"The branch is closed today."};
+  if(oStat==="offline") return {open:false, closed:true, msg:"The branch is temporarily offline. Please try again shortly."};
   var resOpen = toMin(b.reservation_open_time || "06:00");
   var closeBefore = parseInt(b.online_close_before_hours || 1, 10);
   var onlineClose = toMin(status.close) - closeBefore*60;
   var nowMin = phtMinutesOfDay();
-  if(nowMin < resOpen)  return {open:false, msg:"Online reservations open at "+fmt12h(b.reservation_open_time||"06:00")+"."};
-  if(nowMin >= onlineClose) return {open:false, msg:"Online reservations for today have closed."};
+  if(nowMin < resOpen)  return {open:false, closed:false, msg:"Online reservations open at "+fmt12h(b.reservation_open_time||"06:00")+"."};
+  if(nowMin >= onlineClose) return {open:false, closed:false, msg:"Online reservations for today have closed."};
   return {open:true, msg:""};
 }
 
@@ -517,7 +523,7 @@ function renderHome(){
   +   '<div class="count"><div class="val" style="color:'+(serving>0?"var(--sss-blue-l)":"var(--text-muted)")+'">🔵 '+serving+'</div><div class="lbl">Being Served</div></div>'
   + '</div>'
   + (resv.test ? '<div class="note note-blue">🧪 '+escapeHtml(resv.msg)+'</div>' : "")
-  + (!canReserve && status.isOpen && !resv.open ? '<div class="note note-yellow">⏰ '+escapeHtml(resv.msg)+'</div>' : "")
+  + (!resv.open && !resv.test && !resv.closed ? '<div class="note note-yellow">⏰ '+escapeHtml(resv.msg)+'</div>' : "")
   + (active
       ? '<div class="note note-blue">📋 You have an active reservation <b>'+escapeHtml(active.res_num||"")+'</b> — <b>'+escapeHtml(active.status||"RESERVED")+'</b>.<br>You can hold one reservation at a time. View it to check status or cancel before booking another.</div>'
         + '<button class="btn btn-primary" id="btnManage"><span>📋 View / Manage My Reservation</span></button>'
@@ -581,7 +587,7 @@ var TERMINAL = ["COMPLETED","CANCELLED","VOID","EXPIRED"];
    terminal state or is from a past day, so the member can book again. Zero-PII: stores only
    queue tokens (res_num, id, queue_date). Degrades gracefully if storage is unavailable. */
 var ACTIVE_RES_KEY = "mabilisss_active_res_" + (CFG && CFG.BRANCH_CODE ? CFG.BRANCH_CODE : "DEFAULT");
-function saveActiveRes(entry){ try{ localStorage.setItem(ACTIVE_RES_KEY, JSON.stringify({ res_num:entry.res_num, id:entry.id, queue_date:entry.queue_date })); }catch(e){} }
+function saveActiveRes(entry){ try{ localStorage.setItem(ACTIVE_RES_KEY, JSON.stringify({ res_num:entry.res_num, id:entry.id, queue_date:entry.queue_date, cancel_token:entry.cancel_token||null })); }catch(e){} }
 function clearActiveRes(){ try{ localStorage.removeItem(ACTIVE_RES_KEY); }catch(e){} }
 function loadActiveRes(){ try{ return JSON.parse(localStorage.getItem(ACTIVE_RES_KEY)||"null"); }catch(e){ return null; } }
 function getActiveReservation(){
@@ -859,12 +865,13 @@ function submitReservation(){
     };
     if(slotsOn && STATE.sel.timeslot){ entry.preferred_time_slot=STATE.sel.timeslot; }
 
-    sb.from("queue_entries").insert(entry).then(function(r){
+    gw("book", { entry: entry }).then(function(r){
       if(r.error){
         STATE.submitting=false; btn.disabled=false; btn.innerHTML=orig;
         setMsg("⚠ Could not create your reservation: "+(r.error.message||"please retry."),"err");
         console.error(r.error); return;
       }
+      if(r.data && r.data.cancel_token) entry.cancel_token = r.data.cancel_token;
       saveActiveRes(entry);
       STATE.ticket={ res_num:entry.res_num, id:entry.id, category:(c.label||c.id), service:(STATE.sel.svc?STATE.sel.svc.label:""), lane:lane, timeslot:(entry.preferred_time_slot||null), bqms:null };
       STATE.submitting=false;
@@ -975,11 +982,9 @@ function trackLookup(mode, val){
     if(found){ STATE.trackedId=found.id; go("tracker"); return; }
     // cross-date lookup for reservation numbers (future appointments) — direct query
     if(mode==="res"){
-      sb.from("queue_entries")
-        .select("id,res_num,queue_date,preferred_time_slot,category_id,status,source,bqms_number,slot,lane")
-        .eq("res_num", vu).limit(3)
+      gw("track", { res_num: vu })
         .then(function(r){
-          var rows=(r&&r.data)?r.data:[];
+          var rows=(r&&r.rows)?r.rows:[];
           var pick = rows.filter(function(x){ return TERMINAL.indexOf(x.status)<0; })[0] || rows[0];
           if(pick){ STATE.trackedEntry=pick; STATE.trackedId=pick.id; go("tracker"); }
           else { setMsg("⚠ No reservation found with that number. Please check and try again.","err"); }
@@ -996,13 +1001,28 @@ function countAhead(entry){
   var myNum=parseInt(String(myBqms).replace(/\D/g,""),10);
   if(isNaN(myNum)) return null;
   var myCat=entry.category_id, myLane=entry.lane||"regular";
-  return STATE.queue.filter(function(r){
-    if(r.category_id!==myCat) return false;
-    if((r.lane||"regular")!==myLane) return false;
+  // Only entries that already HAVE a BQMS number in my exact category and lane compete with me.
+  // A reservation with no number yet is not in the live line, so it is not counted.
+  var numbered=STATE.queue.filter(function(r){
+    return r.category_id===myCat && (r.lane||"regular")===myLane && r.bqms_number;
+  });
+  // Now-serving anchor: the furthest number staff have reached in this lane (max BQMS among
+  // SERVING, PASSED, COMPLETED). Anything at or below this point is already behind the counter,
+  // so a skipped no-show still flagged ARRIVED must not be counted as ahead.
+  var nowServing=0;
+  numbered.forEach(function(r){
+    if(r.status==="SERVING"||r.status==="PASSED"||r.status==="COMPLETED"){
+      var n=parseInt(String(r.bqms_number).replace(/\D/g,""),10);
+      if(!isNaN(n) && n>nowServing) nowServing=n;
+    }
+  });
+  // Ahead = numbered entries still actively waiting (not served, serving, passed, parked, or
+  // terminal), strictly between the now-serving point and my own number.
+  return numbered.filter(function(r){
     if(TERMINAL.indexOf(r.status)>=0) return false;
-    if(!r.bqms_number) return false;
+    if(r.status==="SERVING"||r.status==="PASSED"||r.status==="PARKED") return false;
     var n=parseInt(String(r.bqms_number).replace(/\D/g,""),10);
-    return !isNaN(n) && n<myNum;
+    return !isNaN(n) && n>nowServing && n<myNum;
   }).length;
 }
 
@@ -1042,6 +1062,12 @@ function renderTrackerView(){
   var isTerminal=TERMINAL.indexOf(status)>=0;
   var ahead = (hasBqms && !isTerminal) ? countAhead(t) : null;
 
+  // R2: pre-open detection. Working, non-holiday day, before office open time.
+  var _pb = STATE.branch || {}, _pst = resolveStatus(_pb);
+  var _phol = (_pb.holidays||"").split(",").map(function(s){return s.trim();}).indexOf(phtDateStr()) >= 0;
+  var _pwrk = (_pb.working_days||"mon,tue,wed,thu,fri").toLowerCase().indexOf(phtDayKey()) >= 0;
+  var preOpen = _pwrk && !_phol && (phtMinutesOfDay() < toMin(_pst.open||"08:00"));
+
   // status banner
   var banner="";
   if(status==="SERVING"){
@@ -1056,6 +1082,13 @@ function renderTrackerView(){
     banner='<div class="tk-banner cancel">⏰ <b>Slot Expired</b><div class="tk-banner-sub">Please reserve a new slot or visit as a walk-in, subject to available slots.</div></div>';
   } else if(status==="VOID"){
     banner='<div class="tk-banner cancel">🚫 <b>Reservation Voided</b><div class="tk-banner-sub">Please contact branch staff if you have questions.</div></div>';
+  } else if(status==="PARKED"){
+    banner='<div class="tk-banner passed">⏸️ ON HOLD<br><b>PLEASE WAIT TO BE RE-CALLED</b><div class="tk-banner-sub">Staff set your number aside for a moment. Stay nearby, you will be called again shortly.</div></div>';
+  }
+
+  // R2: pre-open banner for a number held before the branch opens (no terminal/serving/passed banner set).
+  if(!banner && preOpen && !isTerminal && status!=="SERVING" && status!=="PASSED"){
+    banner='<div class="tk-banner passed">🕗 BRANCH NOT YET OPEN<br><b>SERVING BEGINS AT '+fmt12h(_pst.open||"08:00")+'</b><div class="tk-banner-sub">Your number is held. Please be at the branch when serving starts.</div></div>';
   }
 
   var numDisplay = hasBqms ? t.bqms_number : (t.res_num||"—");
@@ -1064,6 +1097,7 @@ function renderTrackerView(){
   var aheadDisplay, aheadColor;
   if(status==="SERVING"){ aheadDisplay="IT'S YOUR TURN!"; aheadColor="var(--ok-d)"; }
   else if(status==="PASSED"){ aheadDisplay="PASSED"; aheadColor="var(--err)"; }
+  else if(status==="PARKED"){ aheadDisplay="ON HOLD"; aheadColor="var(--warn-d)"; }
   else if(ahead===null){ aheadDisplay = hasBqms?"—":"Waiting for branch to open"; aheadColor="var(--text-muted)"; }
   else if(ahead===0){ aheadDisplay="You're Next!"; aheadColor="var(--ok-d)"; }
   else { aheadDisplay=String(ahead); aheadColor="var(--warn-d)"; }
@@ -1074,24 +1108,30 @@ function renderTrackerView(){
         +   '<div class="tk-num">'+escapeHtml(String(numDisplay))+'</div>'
         +   '<div class="tk-num-label">'+numLabel+'</div>';
   if(!isTerminal){
-    html += '<div class="tk-ahead"><div class="tk-ahead-val" style="color:'+aheadColor+'">'+aheadDisplay+'</div><div class="tk-ahead-lbl">'+(status==="SERVING"||status==="PASSED"?"Status":"Ahead of you")+'</div></div>';
+    html += '<div class="tk-ahead"><div class="tk-ahead-val" style="color:'+aheadColor+'">'+aheadDisplay+'</div><div class="tk-ahead-lbl">'+(status==="SERVING"||status==="PASSED"||status==="PARKED"?"Status":"Ahead of you")+'</div></div>';
   }
   if(t.preferred_time_slot){ html += '<div class="tk-slot">🕐 Time window: <b>'+fmtSlotWindow(t.preferred_time_slot)+'</b></div>'; }
   html += '</div>';
 
   // estimate (rough) when waiting with people ahead
-  if(!isTerminal && ahead!==null && ahead>0 && status!=="PASSED"){
-    var avg=parseInt((STATE.sel.cat&&STATE.sel.cat.avg_time),10); if(isNaN(avg)||avg<=0) avg=8;
-    var lo=Math.round(ahead*avg*0.75), hi=Math.round(ahead*avg*1.35);
-    html += '<div class="note note-blue">⏱ Rough estimate: about <b>'+lo+'–'+hi+' min</b> based on average service speed. Actual wait may vary.</div>';
+  if(!isTerminal && ahead!==null && ahead>0 && status!=="PASSED" && status!=="SERVING" && status!=="PARKED"){
+    if(preOpen){
+      html += '<div class="note note-blue">⏱ Time estimates begin once serving starts at '+fmt12h(_pst.open||"08:00")+'.</div>';
+    } else {
+      var avg=parseInt((STATE.sel.cat&&STATE.sel.cat.avg_time),10); if(isNaN(avg)||avg<=0) avg=8;
+      var lo=Math.round(ahead*avg*0.75), hi=Math.round(ahead*avg*1.35);
+      html += '<div class="note note-blue">⏱ Rough estimate: about <b>'+lo+'–'+hi+' min</b> based on average service speed. Actual wait may vary.</div>';
+    }
   }
-  if(!isTerminal && ahead!==null && ahead<=3 && ahead>0){
+  if(!isTerminal && ahead!==null && ahead<=3 && ahead>0 && status!=="PARKED" && status!=="SERVING"){
     html += '<div class="note note-yellow">⚠️ Your number is approaching — only <b>'+ahead+'</b> ahead. Please proceed to the waiting area.</div>';
   }
 
   // actions
   html += '<div class="pwa-msg" id="trackerMsg"></div>';
-  if(status==="RESERVED"||status==="ARRIVED"){
+  // Owner-only cancel: only the device that created this reservation via the PWA may cancel it.
+  var _owned = (function(){ var av=loadActiveRes(); return !!(av && av.id===t.id); })();
+  if((status==="RESERVED"||status==="ARRIVED") && _owned){
     html += '<button class="btn btn-secondary" id="btnCancel"><span>🚫 Cancel My Reservation</span></button>';
   }
   if(status==="COMPLETED"){
@@ -1111,9 +1151,7 @@ function cancelReservation(t){
   if(!confirm("Cancel your reservation? Your slot will be released and you'll need to reserve again.")) return;
   var msg=$("trackerMsg"); var setMsg=function(x,k){ if(msg){ msg.textContent=x; msg.className="pwa-msg "+(k||""); } };
   setMsg("Cancelling…","");
-  sb.from("queue_entries")
-    .update({ status:"CANCELLED", cancelled_at:nowPhtIso() })
-    .eq("id", t.id).eq("status", t.status)   // atomic guard: only if still in this state
+  gw("cancel", { id: t.id, status: t.status, token: (loadActiveRes()||{}).cancel_token || null })
     .then(function(r){
       if(r.error){ setMsg("⚠ Could not cancel: "+(r.error.message||"retry."),"err"); return; }
       var av=loadActiveRes(); if(av && av.id===t.id){ clearActiveRes(); }
@@ -1125,8 +1163,8 @@ function cancelReservation(t){
 function mountCsat(t){
   var mount=$("csatMount"); if(!mount) return;
   // already submitted?
-  sb.from("csat_responses").select("id").eq("queue_entry_id", t.id).limit(1).then(function(r){
-    if(r&&r.data&&r.data.length){ mount.innerHTML='<div class="note note-blue">🙏 Thank you for your feedback! It helps us serve you better.</div>'; return; }
+  gw("csat_check", { queue_entry_id: t.id }).then(function(r){
+    if(r&&r.exists){ mount.innerHTML='<div class="note note-blue">🙏 Thank you for your feedback! It helps us serve you better.</div>'; return; }
     renderCsatForm(t, mount);
   }).catch(function(){ renderCsatForm(t, mount); });
 }
@@ -1181,7 +1219,7 @@ function renderCsatForm(t, mount){
     };
     var cmt=($("csatComment").value||"").trim(); if(cmt) payload.comment=cmt;
     var btn=$("csatSubmit"); btn.disabled=true; btn.innerHTML="<span>⏳ Submitting…</span>";
-    sb.from("csat_responses").insert(payload).then(function(r){
+    gw("csat_submit", { payload: payload }).then(function(r){
       if(r.error){ btn.disabled=false; btn.innerHTML="<span>✅ Submit Feedback</span>"; setMsg("⚠ Could not submit: "+(r.error.message||"retry."),"err"); return; }
       mount.innerHTML='<div class="note note-blue">🙏 Thank you for your feedback! It helps us serve you better.</div>';
     }).catch(function(){ btn.disabled=false; btn.innerHTML="<span>✅ Submit Feedback</span>"; setMsg("⚠ Network problem. Please retry.","err"); });
