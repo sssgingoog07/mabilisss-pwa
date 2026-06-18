@@ -1083,7 +1083,12 @@ function renderTrackerView(){
   } else if(status==="VOID"){
     banner='<div class="tk-banner cancel">🚫 <b>Reservation Voided</b><div class="tk-banner-sub">Please contact branch staff if you have questions.</div></div>';
   } else if(status==="PARKED"){
-    banner='<div class="tk-banner passed">⏸️ ON HOLD<br><b>PLEASE WAIT TO BE RE-CALLED</b><div class="tk-banner-sub">Staff set your number aside for a moment. Stay nearby, you will be called again shortly.</div></div>';
+    if(t.member_ready_at){
+      var _rdyCtr = t.parked_by_counter ? escapeHtml(String(t.parked_by_counter)) : "your counter";
+      banner='<div class="tk-banner passed">✅ <b>You\'re all set</b><div class="tk-banner-sub">The staff has been notified and will call your number again shortly. Please keep this screen open and watch for your number, then proceed to '+_rdyCtr+'.</div></div>';
+    } else {
+      banner='<div class="tk-banner passed">⏸️ ON HOLD<div class="tk-banner-sub">The staff set your transaction aside while you prepare your documents or forms. When you have everything ready, tap the button below and the staff will call you to continue. Your number stays the same.</div></div>';
+    }
   }
 
   // R2: pre-open banner for a number held before the branch opens (no terminal/serving/passed banner set).
@@ -1134,6 +1139,9 @@ function renderTrackerView(){
   if((status==="RESERVED"||status==="ARRIVED") && _owned){
     html += '<button class="btn btn-secondary" id="btnCancel"><span>🚫 Cancel My Reservation</span></button>';
   }
+  if(status==="PARKED" && _owned && !t.member_ready_at){
+    html += '<button class="btn btn-primary" id="btnReady"><span>🙋 I\'m back and ready</span></button>';
+  }
   if(status==="COMPLETED"){
     html += '<div id="csatMount"></div>';
   }
@@ -1143,6 +1151,7 @@ function renderTrackerView(){
   $("screen").innerHTML=html; wireBack();
   var rf=$("btnRefresh"); if(rf) rf.addEventListener("click", function(){ refreshQueue().then(renderTrackerView); });
   var cx=$("btnCancel"); if(cx) cx.addEventListener("click", function(){ cancelReservation(t); });
+  var rb=$("btnReady"); if(rb) rb.addEventListener("click", function(){ markReady(t); });
   if(status==="COMPLETED"){ mountCsat(t); }
 }
 
@@ -1155,6 +1164,18 @@ function cancelReservation(t){
     .then(function(r){
       if(r.error){ setMsg("⚠ Could not cancel: "+(r.error.message||"retry."),"err"); return; }
       var av=loadActiveRes(); if(av && av.id===t.id){ clearActiveRes(); }
+      refreshQueue().then(renderTrackerView);
+    }).catch(function(){ setMsg("⚠ Network problem. Please retry.","err"); });
+}
+
+/* ── Member taps "I'm back and ready" (PARKED): notify staff, keep the same number ── */
+function markReady(t){
+  var msg=$("trackerMsg"); var setMsg=function(x,k){ if(msg){ msg.textContent=x; msg.className="pwa-msg "+(k||""); } };
+  setMsg("Letting the staff know…","");
+  gw("ready", { id: t.id, status: t.status, token: (loadActiveRes()||{}).cancel_token || null })
+    .then(function(r){
+      if(r.error){ setMsg("⚠ Could not notify staff: "+(r.error.message||"please try again."),"err"); return; }
+      setMsg("✅ The staff has been notified.","");
       refreshQueue().then(renderTrackerView);
     }).catch(function(){ setMsg("⚠ Network problem. Please retry.","err"); });
 }
