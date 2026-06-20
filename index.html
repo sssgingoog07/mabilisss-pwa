@@ -906,6 +906,7 @@ function renderTicket(){
     +   '</div>'
     + '</div>'
     + '<div class="note note-blue">📸 <b>Save this screen.</b> Take a screenshot or write down your number. Your official <b>BQMS queue number</b> is assigned when the branch opens — tap Track to check.</div>'
+    + (t.timeslot?'<div class="note note-yellow">⏰ Please be at the branch during your time window so you don\'t miss your turn. Arriving early? Check in at the kiosk to get your queue number.</div>':"")
     + '<div class="card how">'
     +   '<div class="how-title">What happens next</div>'
     +   '<div class="how-step"><div class="how-num">1</div><div>Your number is <b>'+escapeHtml(t.res_num)+'</b>. Keep it safe.</div></div>'
@@ -1116,6 +1117,7 @@ function renderTrackerView(){
     html += '<div class="tk-ahead"><div class="tk-ahead-val" style="color:'+aheadColor+'">'+aheadDisplay+'</div><div class="tk-ahead-lbl">'+(status==="SERVING"||status==="PASSED"||status==="PARKED"?"Status":"Ahead of you")+'</div></div>';
   }
   if(t.preferred_time_slot){ html += '<div class="tk-slot">🕐 Time window: <b>'+fmtSlotWindow(t.preferred_time_slot)+'</b></div>'; }
+  if(t.preferred_time_slot && status==="RESERVED"){ html += '<div class="note note-yellow" style="margin-top:8px">⏰ Please be at the branch during your time window so you don\'t miss your turn. Arriving early? Check in at the kiosk to get your queue number.</div>'; }
   html += '</div>';
 
   // estimate (rough) when waiting with people ahead
