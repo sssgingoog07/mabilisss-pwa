@@ -36,12 +36,23 @@ window.MABILISSS_CONFIG_REGISTRY = {
     BRANCH_NAME:       "SSS Lapasan Branch",
     SUPABASE_URL:      "https://bbrrfidaphztmbihvxhe.supabase.co"
   },
-  // Future MND branches: LAP, BTN, … add registry entries here.
+
+  H08: {
+    BRANCH_CODE:       "H08",
+    BRANCH_NAME:       "SSS Ozamiz Branch",
+    SUPABASE_URL:      "https://ozorrluolxoxjccstdgk.supabase.co"
+  },
+  // ── MND BRANCH CODES (registry key = official SSS code; friendly code in _ALIAS) ──
+  //  H00 CDO Cagayan de Oro | H01 BTN Butuan | H02 ILG Iligan | H03 TDG Tandag | H04 SUR Surigao
+  //  H05 SFADS San Francisco ADS | H06 VAL Valencia | H07 GNG Gingoog [ACTIVE] | H08 OZA Ozamiz [ACTIVE]
+  //  H09 ORQ Oroquieta | H20 LAP Lapasan [ACTIVE; not in the H00-H09 series — confirm]
+  //  TO ADD A BRANCH: copy the H08 block above, change BRANCH_CODE / BRANCH_NAME / SUPABASE_URL
+  //  (the member app carries NO key — it talks to the gateway), then add its alias to _ALIAS below.
 };
 (function(){
   var params = new URLSearchParams(window.location.search);
   var _bcRaw = (params.get("branch") || "H07").toUpperCase();   // default H07 (Gingoog)
-  var _ALIAS = { GNG: "H07", LAP: "H20" };
+  var _ALIAS = { GNG: "H07", LAP: "H20", OZA: "H08" };
   var branchCode = _ALIAS[_bcRaw] || _bcRaw;
   if (window.MABILISSS_CONFIG_REGISTRY[branchCode]) {
     window.MABILISSS_CONFIG = window.MABILISSS_CONFIG_REGISTRY[branchCode];
