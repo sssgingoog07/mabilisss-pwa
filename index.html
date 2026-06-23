@@ -648,9 +648,41 @@ function onlineRemaining(cat){
   var floorPct = parseInt(STATE.branch.walk_in_floor_pct,10); if(isNaN(floorPct)) floorPct=0;
   var ceiling = Math.floor(cap * (1 - floorPct/100));
   var onlineUsed = STATE.queue.filter(function(r){
-    return r.category_id===cat.id && r.source==="ONLINE" && TERMINAL.indexOf(r.status)<0;
+    return r.category_id===cat.id && (r.source==="ONLINE"||r.source==="APPT") && TERMINAL.indexOf(r.status)<0;
   }).length;
   return Math.max(0, ceiling - onlineUsed);
+}
+
+/* Per-window remaining for a category, carved from the online ceiling with
+   forward-flow: each window's share = ceiling / N (remainder to earliest),
+   and unused slots from ENDED windows flow forward to still-open ones.
+   Counts ONLINE + APPT demand per window (walk-ins draw from the floor, not here).
+   Returns { "HH:MM": remaining }; ended windows return 0. */
+function windowSlotInfo(cat){
+  var slots = buildTimeSlots() || []; var N = slots.length; if(N===0) return {};
+  var cap = parseInt(cat.cap,10); if(isNaN(cap)) cap=50;
+  var floorPct = parseInt(STATE.branch.walk_in_floor_pct,10); if(isNaN(floorPct)) floorPct=0;
+  var ceiling = Math.floor(cap * (1 - floorPct/100));
+  function usedIn(win){
+    return STATE.queue.filter(function(r){
+      return r.category_id===cat.id && (r.source==="ONLINE"||r.source==="APPT")
+          && TERMINAL.indexOf(r.status)<0 && r.preferred_time_slot===win;
+    }).length;
+  }
+  var base = Math.floor(ceiling / N), rem = ceiling - base*N;
+  var alloc = {}, carry = 0;
+  slots.forEach(function(s, i){
+    var a = base + (i < rem ? 1 : 0); alloc[s.window] = a;
+    if(s.ended) carry += Math.max(0, a - usedIn(s.window));
+  });
+  var open = slots.filter(function(s){ return !s.ended; }), M = open.length;
+  if(M>0 && carry>0){
+    var add = Math.floor(carry / M), addRem = carry - add*M;
+    open.forEach(function(s, i){ alloc[s.window] += add + (i < addRem ? 1 : 0); });
+  }
+  var out = {};
+  slots.forEach(function(s){ out[s.window] = s.ended ? 0 : Math.max(0, alloc[s.window] - usedIn(s.window)); });
+  return out;
 }
 
 /* Services for a category */
@@ -777,16 +809,20 @@ function renderTimeslot(){
   if(!slots || !slots.length){
     html += '<div class="card" style="text-align:center;color:var(--text-muted)">No time windows available today.</div>';
   } else {
+    var winRem = windowSlotInfo(c);
     var anyOpen=false;
     slots.forEach(function(s){
-      var disabled = s.ended;
+      var left = winRem[s.window]; if(typeof left!=="number") left = 0;
+      var full = !s.ended && left<=0;
+      var disabled = s.ended || full;
       if(!disabled) anyOpen=true;
+      var stateLbl = s.ended ? "Ended" : (full ? "Full" : (left+" left"));
       html += '<button class="ts-btn'+(disabled?" full":"")+'" data-ts="'+s.window+'" '+(disabled?"disabled":"")+'>'
             +   '<span>🕐 '+fmt12h(s.window)+' – '+fmt12h(s.windowEnd)+'</span>'
-            +   '<span class="ts-state">'+(disabled?"Ended":"Available")+'</span>'
+            +   '<span class="ts-state">'+stateLbl+'</span>'
             + '</button>';
     });
-    if(!anyOpen) html += '<div class="note note-yellow">All time windows for today have ended. Please try the next working day.</div>';
+    if(!anyOpen) html += '<div class="note note-yellow">All time windows for today are full or have ended. Please try the next working day.</div>';
   }
   $("screen").innerHTML = html; wireBack();
   Array.prototype.forEach.call(document.querySelectorAll(".ts-btn:not(.full)"), function(btn){
@@ -864,6 +900,15 @@ function submitReservation(){
     var rem = c.priority_lane_enabled ? remainingFor(c,lane) : remainingFor(c,null);
     var slotsOn=(STATE.branch.time_slot_enabled===true||String(STATE.branch.time_slot_enabled)==="true");
     if(slotsOn){ var onl=onlineRemaining(c); if(onl<rem) rem=onl; }
+    if(slotsOn && STATE.sel.timeslot){
+      var wr=windowSlotInfo(c)[STATE.sel.timeslot];
+      if(typeof wr==="number" && wr<=0){
+        STATE.submitting=false; btn.disabled=false; btn.innerHTML=orig;
+        setMsg("\u26a0 Sorry, your selected time window just filled up. Please go back and choose another window.","err");
+        return;
+      }
+      if(typeof wr==="number" && wr<rem) rem=wr;
+    }
     if(rem<=0){
       STATE.submitting=false; btn.disabled=false; btn.innerHTML=orig;
       setMsg("⚠ Sorry, the last slot for this transaction was just taken. Please try another transaction or the next working day.","err");
