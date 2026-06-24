@@ -48,6 +48,16 @@ window.MABILISSS_CONFIG_REGISTRY = {
     BRANCH_NAME:       "SSS Oroquieta Branch",
     SUPABASE_URL:      "https://grculpbczjexzgdzigjx.supabase.co"
   },
+  H04: {
+    BRANCH_CODE:       "H04",
+    BRANCH_NAME:       "SSS Surigao Branch",
+    SUPABASE_URL:      "https://tustlqfafrwxeyfvyvet.supabase.co"
+  },
+  H01: {
+    BRANCH_CODE:       "H01",
+    BRANCH_NAME:       "SSS Butuan Branch",
+    SUPABASE_URL:      "https://gzrshriidtqqyifwvkeu.supabase.co"
+  },
   // ── MND BRANCH CODES (registry key = official SSS code; friendly code in _ALIAS) ──
   //  H00 CDO Cagayan de Oro | H01 BTN Butuan | H02 ILG Iligan | H03 TDG Tandag | H04 SUR Surigao
   //  H05 SFADS San Francisco ADS | H06 VAL Valencia | H07 GNG Gingoog [ACTIVE] | H08 OZA Ozamiz [ACTIVE]
@@ -58,7 +68,7 @@ window.MABILISSS_CONFIG_REGISTRY = {
 (function(){
   var params = new URLSearchParams(window.location.search);
   var _bcRaw = (params.get("branch") || "H07").toUpperCase();   // default H07 (Gingoog)
-  var _ALIAS = { GNG: "H07", LAP: "H20", OZA: "H08", ORQ: "H09" };
+  var _ALIAS = { GNG: "H07", LAP: "H20", OZA: "H08", ORQ: "H09", SUR: "H04", BTN: "H01" };
   var branchCode = _ALIAS[_bcRaw] || _bcRaw;
   if (window.MABILISSS_CONFIG_REGISTRY[branchCode]) {
     window.MABILISSS_CONFIG = window.MABILISSS_CONFIG_REGISTRY[branchCode];
