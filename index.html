@@ -42,6 +42,16 @@ window.MABILISSS_CONFIG_REGISTRY = {
     BRANCH_NAME:       "SSS Gingoog Branch",
     SUPABASE_URL:      "https://lwspjziqjjscfzntgtcm.supabase.co"
   },
+  H03: {
+    BRANCH_CODE:       "H03",
+    BRANCH_NAME:       "SSS Tandag Branch",
+    SUPABASE_URL:      "https://sgdvfdklclusiszlqnsb.supabase.co"
+  },
+  H02: {
+    BRANCH_CODE:       "H02",
+    BRANCH_NAME:       "SSS Iligan Branch",
+    SUPABASE_URL:      "https://lsiomyawerxuxjwzgtdd.supabase.co"
+  },
   H20: {
     BRANCH_CODE:       "H20",
     BRANCH_NAME:       "SSS Lapasan Branch",
@@ -85,7 +95,7 @@ window.MABILISSS_CONFIG_REGISTRY = {
 (function(){
   var params = new URLSearchParams(window.location.search);
   var _bcRaw = (params.get("branch") || "H07").toUpperCase();   // default H07 (Gingoog)
-  var _ALIAS = { GNG: "H07", LAP: "H20", OZA: "H08", ORQ: "H09", SUR: "H04", BTN: "H01", CDO: "H00", SFADS: "H05", VAL: "H06" };
+  var _ALIAS = { GNG: "H07", LAP: "H20", OZA: "H08", ORQ: "H09", SUR: "H04", BTN: "H01", CDO: "H00", SFADS: "H05", VAL: "H06", ILG: "H02", TDG: "H03" };
   var branchCode = _ALIAS[_bcRaw] || _bcRaw;
   if (window.MABILISSS_CONFIG_REGISTRY[branchCode]) {
     window.MABILISSS_CONFIG = window.MABILISSS_CONFIG_REGISTRY[branchCode];
