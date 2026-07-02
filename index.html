@@ -364,9 +364,6 @@ body{
 .csat-opt-text{flex:initial;font-size:12px;font-weight:600;}
 .csat-opt .csat-emo{font-size:24px;}
 .csat-opt.sel{border-color:var(--sss-blue);background:var(--sss-blue-soft);color:var(--sss-blue);font-weight:700;}
-.csat-comment{width:100%;margin-top:14px;padding:11px;border:1.5px solid var(--border);border-radius:var(--radius-sm);
-  font-family:inherit;font-size:14px;resize:vertical;min-height:64px;color:var(--text);}
-.csat-comment:focus{outline:none;border-color:var(--sss-blue);}
 .csat .btn{margin-top:14px;}
 
 </style>
@@ -1417,7 +1414,6 @@ function renderCsatForm(t, mount){
   html+='<div class="csat-q">What stood out? (optional)</div><div class="csat-row csat-row-wrap" id="csatQ3">';
   q3opts.forEach(function(o){ html+='<button class="csat-opt csat-opt-text" data-q3="'+o[0]+'">'+o[1]+'</button>'; });
   html+='</div>';
-  html+='<textarea class="csat-comment" id="csatComment" maxlength="500" placeholder="Tell us more (optional)…"></textarea>';
   html+='<div class="pwa-msg" id="csatMsg"></div>';
   html+='<button class="btn btn-primary" id="csatSubmit"><span>✅ Submit Feedback</span></button>';
   html+='<button class="btn btn-secondary" id="csatSkip" style="margin-top:8px"><span>Skip</span></button>';
@@ -1451,7 +1447,6 @@ function renderCsatForm(t, mount){
       q4_loyalty:null,
       submitted_at:nowPhtIso()
     };
-    var cmt=($("csatComment").value||"").trim(); if(cmt) payload.comment=cmt;
     var btn=$("csatSubmit"); btn.disabled=true; btn.innerHTML="<span>⏳ Submitting…</span>";
     gw("csat_submit", { payload: payload }).then(function(r){
       if(r.error){ btn.disabled=false; btn.innerHTML="<span>✅ Submit Feedback</span>"; setMsg("⚠ Could not submit: "+(r.error.message||"retry."),"err"); return; }
