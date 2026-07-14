@@ -1282,7 +1282,11 @@ function renderTrackerView(){
   if(status==="SERVING"){
     banner='<div class="tk-banner srv">🔵 NOW SERVING<br><b>PROCEED TO THE COUNTER</b><div class="tk-banner-sub">Staff is calling your number — please go now.</div></div>';
   } else if(status==="PASSED"){
-    banner='<div class="tk-banner passed">⏭️ YOU WERE PASSED<br><b>RETURN TO THE COUNTER</b><div class="tk-banner-sub">Your number was called but you weren\'t at the counter. Please return now.</div></div>';
+    if(t.member_ready_at){
+      banner='<div class="tk-banner passed">✅ <b>You\'re all set</b><div class="tk-banner-sub">The staff have been told you are here. You have NOT lost your turn. Please stay near the counters and watch for your number.</div></div>';
+    } else {
+      banner='<div class="tk-banner passed">⏭️ YOUR NUMBER WAS CALLED<br><b>PLEASE COME FORWARD</b><div class="tk-banner-sub">You were not at the counter when your number was called. You have NOT lost your turn. Please go to any counter for your service, and tap the button below so the staff know you are here.</div></div>';
+    }
   } else if(status==="COMPLETED"){
     banner='<div class="tk-banner done">✅ <b>Transaction Completed</b><div class="tk-banner-sub">Thank you for visiting SSS!</div></div>';
   } else if(status==="CANCELLED"){
@@ -1349,8 +1353,8 @@ function renderTrackerView(){
   if((status==="RESERVED"||status==="ARRIVED") && _owned){
     html += '<button class="btn btn-secondary" id="btnCancel"><span>🚫 Cancel My Reservation</span></button>';
   }
-  if(status==="PARKED" && _owned && !t.member_ready_at){
-    html += '<button class="btn btn-primary" id="btnReady"><span>🙋 I\'m back and ready</span></button>';
+  if((status==="PARKED" || status==="PASSED") && _owned && !t.member_ready_at){
+    html += '<button class="btn btn-primary" id="btnReady"><span>🙋 I\'m here and waiting</span></button>';
   }
   if(status==="COMPLETED"){
     html += '<div id="csatMount"></div>';
