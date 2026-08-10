@@ -1215,23 +1215,18 @@ function countAhead(entry){
   var numbered=STATE.queue.filter(function(r){
     return r.category_id===myCat && (r.lane||"regular")===myLane && r.bqms_number;
   });
-  // Now-serving anchor: the furthest number staff have reached in this lane (max BQMS among
-  // SERVING, PASSED, COMPLETED). Anything at or below this point is already behind the counter,
-  // so a skipped no-show still flagged ARRIVED must not be counted as ahead.
-  var nowServing=0;
-  numbered.forEach(function(r){
-    if(r.status==="SERVING"||r.status==="PASSED"||r.status==="COMPLETED"){
-      var n=parseInt(String(r.bqms_number).replace(/\D/g,""),10);
-      if(!isNaN(n) && n>nowServing) nowServing=n;
-    }
-  });
-  // Ahead = numbered entries still actively waiting (not served, serving, passed, parked, or
-  // terminal), strictly between the now-serving point and my own number.
+  // Ahead = numbered entries still actively waiting (not terminal, not serving, passed, or
+  // parked) with a LOWER BQMS number than mine. No max "now-serving" anchor is used: the staff
+  // console formally PASSES any genuinely skipped number, and exempts appointments from that pass
+  // (a booked appt legitimately jumps ahead WITHOUT skipping the lower regular numbers). So a
+  // lower number still ARRIVED is genuinely still waiting, and a higher appt number is excluded
+  // by the n<myNum test below. (Fixes: an appt served out of sequence, e.g. #1043 while regular
+  // was at #1033, collapsed every lower waiter to "You're Next!".)
   return numbered.filter(function(r){
     if(TERMINAL.indexOf(r.status)>=0) return false;
     if(r.status==="SERVING"||r.status==="PASSED"||r.status==="PARKED") return false;
     var n=parseInt(String(r.bqms_number).replace(/\D/g,""),10);
-    return !isNaN(n) && n>nowServing && n<myNum;
+    return !isNaN(n) && n<myNum;
   }).length;
 }
 
