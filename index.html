@@ -599,10 +599,10 @@ function renderHome(){
   + (!resv.open && !resv.test && !resv.closed ? '<div class="note note-yellow">⏰ '+escapeHtml(resv.msg)+'</div>' : "")
   + (active
       ? '<div class="note note-blue">📋 You have an active reservation <b>'+escapeHtml(active.res_num||"")+'</b> — <b>'+escapeHtml(active.status||"RESERVED")+'</b>.<br>You can hold one reservation at a time. View it to check status or cancel before booking another.</div>'
-        + '<button class="btn btn-primary" id="btnManage"><span>📋 View / Manage My Reservation</span></button>'
+        + '<button class="btn btn-primary" id="btnManage"><span>🔍 Track / Manage My Reservation</span></button>'
       : '<button class="btn btn-primary" id="btnReserve" '+(canReserve?"":"disabled")+'><span>📋 Get a Queue Number</span></button>')
   + '<button class="btn btn-secondary" id="btnTrack">'
-  +   '<span>🔍 Track My Number</span>'
+  +   '<span>🔍 '+(active?"Track a different number":"Track My Number")+'</span>'
   + '</button>'
   + howItWorksHtml(b);
 
@@ -1113,7 +1113,7 @@ function renderTicket(){
     +     (t.timeslot?'<div class="sum-row"><span>Time window</span><b>'+fmtSlotWindow(t.timeslot)+'</b></div>':"")
     +   '</div>'
     + '</div>'
-    + '<div class="note note-blue">📸 <b>Save this screen.</b> Take a screenshot or write down your number. Your official <b>BQMS queue number</b> is assigned when the branch opens — tap Track to check.</div>'
+    + '<div class="note note-blue">📸 <b>Save this screen.</b> Take a screenshot or write down your number. Your official <b>BQMS queue number</b> is assigned once the branch opens, around your time window — tap Track to check.</div>'
     + (t.timeslot?'<div class="note note-yellow">⏰ Please be at the branch during your time window so you don\'t miss your turn. Arriving early? Check in at the kiosk to get your queue number.</div>':"")
     + '<div class="card how">'
     +   '<div class="how-title">What happens next</div>'
@@ -1125,7 +1125,14 @@ function renderTicket(){
     + '<button class="btn btn-primary" id="tkTrack"><span>🔍 Track My Number</span></button>'
     + '<button class="btn btn-secondary" id="tkHome"><span>🏠 Back to Home</span></button>';
   $("screen").innerHTML=html;
-  $("tkTrack").addEventListener("click", function(){ go("track_input"); });
+  $("tkTrack").addEventListener("click", function(){
+    // Track the reservation just made — directly, not the blank lookup form.
+    STATE.trackedId = STATE.ticket.id;
+    STATE.trackedEntry = { id:STATE.ticket.id, res_num:STATE.ticket.res_num, status:"RESERVED",
+                           bqms_number:STATE.ticket.bqms||null, lane:STATE.ticket.lane||"regular",
+                           preferred_time_slot:STATE.ticket.timeslot||null, _synthetic:true };
+    go("tracker");
+  });
   $("tkHome").addEventListener("click", function(){ STATE.sel={cat:null,svc:null,timeslot:null,lane:"regular",priority:"regular"}; loadHome(); });
 }
 
@@ -1311,7 +1318,7 @@ function renderTrackerView(){
   if(status==="SERVING"){ aheadDisplay="IT'S YOUR TURN!"; aheadColor="var(--ok-d)"; }
   else if(status==="PASSED"){ aheadDisplay="PASSED"; aheadColor="var(--err)"; }
   else if(status==="PARKED"){ aheadDisplay="ON HOLD"; aheadColor="var(--warn-d)"; }
-  else if(ahead===null){ aheadDisplay = hasBqms?"—":"Waiting for branch to open"; aheadColor="var(--text-muted)"; }
+  else if(ahead===null){ aheadDisplay = hasBqms ? "—" : (preOpen ? "Waiting for branch to open" : "Number being assigned"); aheadColor="var(--text-muted)"; }
   else if(ahead===0){ aheadDisplay="You're Next!"; aheadColor="var(--ok-d)"; }
   else { aheadDisplay=String(ahead); aheadColor="var(--warn-d)"; }
 
@@ -1326,6 +1333,13 @@ function renderTrackerView(){
   if(t.preferred_time_slot){ html += '<div class="tk-slot">🕐 Time window: <b>'+fmtSlotWindow(t.preferred_time_slot)+'</b></div>'; }
   if(t.preferred_time_slot && status==="RESERVED"){ html += '<div class="note note-yellow" style="margin-top:8px">⏰ Please be at the branch during your time window so you don\'t miss your turn. Arriving early? Check in at the kiosk to get your queue number.</div>'; }
   html += '</div>';
+
+  // Branch open but no BQMS yet: reassure and say when/where the number comes.
+  if(!isTerminal && !hasBqms && !preOpen){
+    html += '<div class="note note-blue">✅ The branch is open. Your official BQMS number is assigned around your time window'
+          + (t.preferred_time_slot ? ' ('+fmtSlotWindow(t.preferred_time_slot)+')' : '')
+          + '. Tap Refresh in a moment to see it.</div>';
+  }
 
   // estimate (rough) when waiting with people ahead
   if(!isTerminal && ahead!==null && ahead>0 && status!=="PASSED" && status!=="SERVING" && status!=="PARKED"){
