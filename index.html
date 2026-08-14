@@ -1217,23 +1217,28 @@ function countAhead(entry){
   var myNum=parseInt(String(myBqms).replace(/\D/g,""),10);
   if(isNaN(myNum)) return null;
   var myCat=entry.category_id, myLane=entry.lane||"regular";
-  // Only entries that already HAVE a BQMS number in my exact category and lane compete with me.
-  // A reservation with no number yet is not in the live line, so it is not counted.
+  // Same CATEGORY, BOTH lanes, that already have a BQMS number. Priority is served ahead of
+  // regular, so a regular member must also count everyone waiting in the priority lane, not just
+  // their own lane. A reservation with no number yet is not in the live line, so it is not counted.
   var numbered=STATE.queue.filter(function(r){
-    return r.category_id===myCat && (r.lane||"regular")===myLane && r.bqms_number;
+    return r.category_id===myCat && r.bqms_number;
   });
-  // Ahead = numbered entries still actively waiting (not terminal, not serving, passed, or
-  // parked) with a LOWER BQMS number than mine. No max "now-serving" anchor is used: the staff
-  // console formally PASSES any genuinely skipped number, and exempts appointments from that pass
-  // (a booked appt legitimately jumps ahead WITHOUT skipping the lower regular numbers). So a
-  // lower number still ARRIVED is genuinely still waiting, and a higher appt number is excluded
-  // by the n<myNum test below. (Fixes: an appt served out of sequence, e.g. #1043 while regular
-  // was at #1033, collapsed every lower waiter to "You're Next!".)
+  // Still-actively-waiting only (not terminal, serving, passed, or parked). No max "now-serving"
+  // anchor: the staff console PASSES genuinely skipped numbers and exempts appointments from that
+  // pass, so a lower number still ARRIVED is genuinely still waiting.
   return numbered.filter(function(r){
     if(TERMINAL.indexOf(r.status)>=0) return false;
     if(r.status==="SERVING"||r.status==="PASSED"||r.status==="PARKED") return false;
+    var rLane=r.lane||"regular";
     var n=parseInt(String(r.bqms_number).replace(/\D/g,""),10);
-    return !isNaN(n) && n<myNum;
+    if(isNaN(n)) return false;
+    if(myLane==="priority"){
+      // A priority member: only lower-numbered priority waiters are ahead.
+      return rLane==="priority" && n<myNum;
+    }
+    // A regular member: lower-numbered regular waiters PLUS everyone waiting in priority
+    // (priority is served first, so they are all called ahead of this regular number).
+    return (rLane==="regular" && n<myNum) || (rLane==="priority");
   }).length;
 }
 
@@ -1346,7 +1351,8 @@ function renderTrackerView(){
     if(preOpen){
       html += '<div class="note note-blue">⏱ Time estimates begin once serving starts at '+fmt12h(_pst.open||"08:00")+'.</div>';
     } else {
-      var avg=parseInt((STATE.sel.cat&&STATE.sel.cat.avg_time),10); if(isNaN(avg)||avg<=0) avg=8;
+      var _tcat=(STATE.categories||[]).filter(function(c){return c.id===t.category_id;})[0];
+      var avg=parseInt((_tcat&&_tcat.avg_time),10); if(isNaN(avg)||avg<=0) avg=8;
       var lo=Math.round(ahead*avg*0.75), hi=Math.round(ahead*avg*1.35);
       html += '<div class="note note-blue">⏱ Rough estimate: about <b>'+lo+'–'+hi+' min</b> based on average service speed. Actual wait may vary.</div>';
     }
